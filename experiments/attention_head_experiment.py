@@ -57,14 +57,17 @@ class PatchAttentionHeads(InterventionExperiment):
         # Generate all combinations of model units
         # Different model architectures use different attribute names for number of heads
         p_config = pipeline.model.config
-        if hasattr(p_config, 'n_head'):
-            num_heads = p_config.n_head
-        elif hasattr(p_config, 'num_attention_heads'):
-            num_heads = p_config.num_attention_heads
-        elif hasattr(p_config, 'num_heads'):
-            num_heads = p_config.num_heads
+        if hasattr(p_config, 'head_dim'):
+            head_size = p_config.head_dim   
+        else:
+            if hasattr(p_config, 'n_head'):
+                num_heads = p_config.n_head
+            elif hasattr(p_config, 'num_attention_heads'):
+                num_heads = p_config.num_attention_heads
+            elif hasattr(p_config, 'num_heads'):
+                num_heads = p_config.num_heads
+            head_size = pipeline.model.config.hidden_size // num_heads
             
-        head_size = pipeline.model.config.hidden_size // num_heads
         
         model_units = []
         for layer, head in layer_head_list:
