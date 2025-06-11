@@ -694,7 +694,7 @@ def _train_intervention(pipeline: Pipeline,
                 
             # Get binary mask and indices
             mask_binary = (torch.sigmoid(v.mask) > 0.5).float().cpu()
-            indices = list(torch.nonzero(mask_binary).squeeze().numpy())
+            indices = torch.nonzero(mask_binary).numpy().flatten().tolist()
             
             # Update model unit
             model_unit.set_feature_indices(indices)
