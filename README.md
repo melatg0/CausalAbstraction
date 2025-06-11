@@ -25,7 +25,7 @@ Mechanistic interpretability aims to reverse-engineer what algorithm a neural ne
 ### Neural Network Features
 
 What are the basic building blocks we should look at when trying to understand how AI systems work internally? This question is still being debated among researchers. 
-The causal abstraction framework remains agnostic to this question by allowing for building blocks of any shape and sizes that we call **features**. The features of a hidden vector in a neural network are accessed via an invertible **featurizer**, which might be an orthogonal matrix, the identity function, or an autoencoder. The files in model_units
+The causal abstraction framework remains agnostic to this question by allowing for building blocks of any shape and sizes that we call **features**. The features of a hidden vector in a neural network are accessed via an invertible **featurizer**, which might be an orthogonal matrix, the identity function, or an autoencoder. The neural network components are implemented in the `neural/` directory with modular access to different model units.
 
 
 ### Interchange Interventions
@@ -44,32 +44,30 @@ The codebase implements five baseline approaches for feature construction and se
 
 5. **SAE (Sparse Autoencoder)**: Leverages pre-trained sparse autoencoders like GemmaScope and LlamaScope. DBM can be used to align principal components with a high-level causal variable.
 
-## Repo Architecture
+## Repository Structure
 
 ### Core Components
 
-- `causal_model.py`: Implementation of causal models, counterfactual generation, and intervention mechanics.
+#### `causal/`
+- `causal_model.py`: Implementation of causal models with variables, values, parent-child relationships, and mechanisms for counterfactual generation and intervention mechanics
+- `counterfactual_dataset.py`: Dataset handling for counterfactual data generation and management
 
-- `task.py`: Framework for defining tasks, mapping inputs/outputs, and managing datasets.
+#### `neural/`
+- `pipeline.py`: Abstract base pipeline and LM pipeline classes for consistent interaction with different language models
+- `model_units.py`: Base classes for accessing model components and features in transformer architectures
+- `LM_units.py`: Language model specific components for residual stream and attention head access
+- `featurizers.py`: Invertible feature space definitions with forward/inverse featurizer modules and intervention utilities
 
-- `pipeline.py`: Abstracts interaction with different language models through a consistent interface.
+#### `experiments/`
+- `pyvene_core.py`: Core utilities for creating, managing, and running intervention experiments using the pyvene library
+- `attention_head_experiment.py`: Experiments targeting attention head components
+- `residual_stream_experiment.py`: Experiments on residual stream representations
+- `intervention_experiment.py`: General intervention experiment framework
+- `filter_experiment.py`: Filtering and selection experiments
+- `aggregate_experiments.py`: Tools for running and aggregating multiple experiments
 
-- `model_units/`: Tools for accessing internal representations in transformer models.
- - `model_units.py`: Base classes for accessing model components and features
- - `LM_units.py`: Language model specific components for residual stream and attention
-
-- `experiments/`: Framework for running intervention experiments and analyzing results.
- - `experiments.py`: Core experiment functionality
- - `LM_experiments.py`: Language model specific experiments
- - `aggregate_experiments.py`: Tools for running and aggregating multiple experiments
-
-### Task Implementations
-
-- `tasks/ARC/`: ARC Easy task implementation
-- `tasks/IOI_task/`: Indirect Object Identification task
-- `tasks/simple_MCQA/`: Multiple Choice Question Answering
-- `tasks/RAVEL/`: Location/language knowledge task
-- `tasks/two_digit_addition_task/`: Arithmetic task
+#### `tests/`
+Comprehensive test suite covering all core components with specialized tests for pyvene integration in `test_pyvene_core/`
 
 ## Getting Started
 
@@ -79,3 +77,11 @@ The codebase implements five baseline approaches for feature construction and se
 git clone https://github.com/your-org/causal-abstraction.git
 cd causal-abstraction
 pip install -r requirements.txt
+```
+
+### Key Dependencies
+
+- **PyTorch**: Deep learning framework for model operations
+- **pyvene**: Library for causal interventions on neural networks
+- **transformers**: Hugging Face library for language model access
+- **pytest**: Testing framework
