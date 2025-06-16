@@ -427,70 +427,116 @@ def _collect_features(dataset, pipeline, model_units_list, config, verbose=False
         # Create mapping for base input activations (identical source and target)
         base_map = {"sources->base": (base_indices, base_indices)}
 
-        # Run model and collect activations from base inputs
-        # Returns: (base_outputs, collected_activations), counterfactual_outputs
-        # where collected_activations has activations at the specified indices
-        # activations is a list of tensors, each with shape (1, hidden_dim)
-        # The list has length = sum(len(model_units)) * batch_size
+        # Collect activations from base inputs
+        # Returns a list of activation tensors, one per model unit
+        # In pyvene 0.1.8+, each tensor contains all batch samples for that unit
         base_activations = intervenable_model(batched_base, unit_locations=base_map)[0][1]
 
-        # Break up the list of activations into a list of lists
-        # The sublist as index i has length len(model_units_list[i])*batch_size
-        start = 0
-        end = batch_len
-        for i in range(len(model_units_list)):
-            for j in range(len(model_units_list[i])):
-                activations = base_activations[start:end]
-                if len(activations[0].shape) == 3:
-                    activations = torch.cat(activations)
-                else:
-                    activations = torch.stack(activations)
-
-                data[i][j].extend(activations.cpu())
-                start = end
-                end += batch_len
-                del activations
-        del batched_base
-        del base_activations
-
-        # # Optionally collect activations from counterfactual inputs too
-        if collect_counterfactuals:
-            # Create separate mapping for each counterfactual
-            source_map = {"sources->base": (source_indices, source_indices)}
+        # Helper function to process activations from both base and counterfactual inputs
+        def process_activations(activations_list, model_units_list, batch_len, data_container):
+            """Process activations from pyvene and add them to the data container.
             
-            # Process each counterfactual input
-            for counterfactual in batched_counterfactuals:
-                counterfactual_activations = intervenable_model(counterfactual, unit_locations=source_map)[0][1]
-                start = 0
-                end = batch_len
+            Handles both pyvene 0.1.8+ format (one tensor per unit) and older formats.
+            
+            Args:
+                activations_list: List of activation tensors from pyvene
+                model_units_list: List of model unit groups  
+                batch_len: Number of samples in the batch
+                data_container: List of lists to store processed activations
+            """
+            total_units = sum(len(unit_group) for unit_group in model_units_list)
+            
+            if len(activations_list) == total_units:
+                # pyvene 0.1.8+ format: one tensor per unit containing all batch samples
+                activation_idx = 0
                 for i in range(len(model_units_list)):
                     for j in range(len(model_units_list[i])):
-                        activations = counterfactual_activations[start:end]
+                        unit_activations = activations_list[activation_idx]
+                        
+                        if len(unit_activations.shape) == 4:
+                            # Attention heads: shape (batch_size, seq_len, num_heads, head_dim)
+                            batch_size, seq_len, num_heads, head_dim = unit_activations.shape
+                            model_unit = model_units_list[i][j]
+                            
+                            if hasattr(model_unit, 'head'):
+                                # Extract specific head: (batch_size, seq_len, head_dim)
+                                head_idx = model_unit.head
+                                activations = unit_activations[:, :, head_idx, :]
+                                if seq_len == 1:
+                                    activations = activations.squeeze(1)  # (batch_size, head_dim)
+                            else:
+                                # Concatenate all heads: (batch_size, seq_len, num_heads * head_dim)
+                                activations = unit_activations.reshape(batch_size, seq_len, num_heads * head_dim)
+                                if seq_len == 1:
+                                    activations = activations.squeeze(1)  # (batch_size, num_heads * head_dim)
+                                    
+                        elif len(unit_activations.shape) == 3:
+                            # Residual stream/MLP: shape (batch_size, seq_len, hidden_dim)
+                            if unit_activations.shape[1] == 1:
+                                activations = unit_activations.squeeze(1)  # (batch_size, hidden_dim)
+                            else:
+                                # Multiple positions: flatten (batch_size, seq_len * hidden_dim)
+                                batch_size = unit_activations.shape[0]
+                                activations = unit_activations.reshape(batch_size, -1)
+                                
+                        elif len(unit_activations.shape) == 2:
+                            # Already correct shape: (batch_size, feature_dim)
+                            activations = unit_activations
+                        else:
+                            raise ValueError(f"Unexpected activation shape: {unit_activations.shape}")
+                        
+                        data_container[i][j].extend(activations.cpu())
+                        activation_idx += 1
+                        
+            elif len(activations_list) == total_units * batch_len:
+                # Older pyvene format: flat list with one activation per (unit, sample) pair
+                activation_idx = 0
+                for i in range(len(model_units_list)):
+                    for j in range(len(model_units_list[i])):
+                        start = activation_idx * batch_len
+                        end = (activation_idx + 1) * batch_len
+                        
+                        activations = activations_list[start:end]
                         if len(activations[0].shape) == 3:
                             activations = torch.cat(activations)
                         else:
                             activations = torch.stack(activations)
-                        # Append activations for this counterfactual to the corresponding list
-                        data[i][j].extend(activations.cpu())
-                        start = end
-                        end += batch_len
+
+                        data_container[i][j].extend(activations.cpu())
+                        activation_idx += 1
+            else:
+                raise ValueError(
+                    f"Unexpected activations format. Length: {len(activations_list)}, "
+                    f"Expected either {total_units} or {total_units * batch_len}"
+                )
+        
+        # Process base activations
+        process_activations(base_activations, model_units_list, batch_len, data)
+        del batched_base
+        del base_activations
+
+        # Optionally collect activations from counterfactual inputs
+        if collect_counterfactuals:
+            source_map = {"sources->base": (source_indices, source_indices)}
+            
+            for counterfactual in batched_counterfactuals:
+                counterfactual_activations = intervenable_model(counterfactual, unit_locations=source_map)[0][1]
+                process_activations(counterfactual_activations, model_units_list, batch_len, data)
                 del counterfactual_activations
             
-            # Free memory
             del batched_counterfactuals
 
-    data = [[torch.cat(datum) for datum in x] for x in data]  # Flatten the nested structure
+    # Stack collected activations into 2D tensors with shape (n_samples, n_features)
+    data = [[torch.stack(datum) for datum in x] for x in data]
 
-    # Print diagnostic information if requested
     if verbose:
-        print(f"Outer length: {len(data)}")
-        print(f"Inner lengths: {[len(x) for x in data]}")
-        print(f"Datum shape: {data[0][0].shape}")
+        print(f"Collected features for {len(data)} unit groups")
+        print(f"Units per group: {[len(x) for x in data]}")
+        print(f"Feature tensor shape: {data[0][0].shape} (samples, features)")
 
-    # The final result is a list of lists, where each outer list corresponds to a 
-    # set of model units and each inner list contains the collected activations 
-    # for each model unit in that set
-    return data 
+    # Return nested list structure:
+    # data[i][j] = tensor of shape (n_samples, n_features) for unit j in group i
+    return data
 
 def _train_intervention(pipeline: Pipeline,
                         model_units_list: List[AtomicModelUnit],

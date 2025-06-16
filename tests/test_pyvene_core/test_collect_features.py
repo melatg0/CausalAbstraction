@@ -218,9 +218,9 @@ class TestCollectFeatures:
             
             # Check that diagnostic information was printed
             captured = capsys.readouterr()
-            assert "Outer length:" in captured.out
-            assert "Inner lengths:" in captured.out
-            assert "Datum shape:" in captured.out
+            assert "Collected features for" in captured.out
+            assert "Units per group:" in captured.out
+            assert "Feature tensor shape:" in captured.out
     
     def test_memory_management(self, mock_tiny_lm, model_units_list, mock_counterfactual_dataset,
                               mock_loaded_inputs):
@@ -308,6 +308,247 @@ class TestCollectFeatures:
             assert call_args[1]["shuffle"] == False
             # Verify the collate_fn is the shallow_collate_fn
             assert call_args[1]["collate_fn"].__name__ == "shallow_collate_fn"
+
+
+class TestCollectFeaturesPyvene18Plus:
+    """Test suite for _collect_features with pyvene 0.1.8+ format."""
+    
+    @pytest.fixture
+    def mock_tiny_lm(self):
+        """Create a mock LM pipeline."""
+        pipeline = MagicMock()
+        pipeline.model.device = "cpu"
+        pipeline.tokenizer.pad_token_id = 0
+        return pipeline
+    
+    @pytest.fixture
+    def mock_counterfactual_dataset(self):
+        """Create a mock counterfactual dataset."""
+        return [
+            {"input": "input_1", "counterfactual_inputs": ["cf_1_1", "cf_1_2"]},
+            {"input": "input_2", "counterfactual_inputs": ["cf_2_1", "cf_2_2"]},
+            {"input": "input_3", "counterfactual_inputs": ["cf_3_1", "cf_3_2"]}
+        ]
+    
+    @pytest.fixture
+    def mock_loaded_inputs(self):
+        """Create mock loaded inputs from the pipeline."""
+        base_loaded = {
+            "input_ids": torch.tensor([[1, 2, 3], [4, 5, 6]]),
+            "attention_mask": torch.tensor([[1, 1, 1], [1, 1, 1]])
+        }
+        
+        cf_loaded = [
+            {
+                "input_ids": torch.tensor([[7, 8, 9], [10, 11, 12]]),
+                "attention_mask": torch.tensor([[1, 1, 1], [1, 1, 1]])
+            },
+            {
+                "input_ids": torch.tensor([[13, 14, 15], [16, 17, 18]]),
+                "attention_mask": torch.tensor([[1, 1, 1], [1, 1, 1]])
+            }
+        ]
+        
+        return base_loaded, cf_loaded
+    
+    @pytest.fixture
+    def attention_head_units(self, mock_tiny_lm):
+        """Create attention head model units for testing."""
+        # Mock attention head units with head attribute
+        class MockAttentionHead:
+            def __init__(self, head_idx):
+                self.head = head_idx
+                self.id = f"AttentionHead(Layer:0,Head:{head_idx})"
+        
+        return [[MockAttentionHead(0), MockAttentionHead(1)]]
+    
+    @pytest.fixture
+    def residual_stream_units(self):
+        """Create residual stream model units for testing."""
+        class MockResidualStream:
+            def __init__(self, layer):
+                self.id = f"ResidualStream(Layer:{layer})"
+        
+        return [[MockResidualStream(0), MockResidualStream(1)]]
+    
+    def test_attention_head_activation_processing(self, mock_tiny_lm, attention_head_units, 
+                                                 mock_counterfactual_dataset, mock_loaded_inputs):
+        """Test processing of 4D attention head activations in pyvene 0.1.8+ format."""
+        base_loaded, cf_loaded = mock_loaded_inputs
+        
+        # Mock pyvene 0.1.8+ format: one tensor per unit with 4D shape
+        # Shape: (batch_size=2, seq_len=1, num_heads=4, head_dim=8)
+        mock_activations = [
+            torch.randn(2, 1, 4, 8),  # First attention head unit
+            torch.randn(2, 1, 4, 8)   # Second attention head unit
+        ]
+        
+        mock_model = MagicMock()
+        mock_model.side_effect = lambda *args, **kwargs: (
+            (MagicMock(), mock_activations), None
+        )
+        
+        with patch('experiments.pyvene_core._prepare_intervenable_model',
+                  return_value=mock_model), \
+             patch('experiments.pyvene_core._prepare_intervenable_inputs',
+                   return_value=(base_loaded, cf_loaded,
+                                {"sources->base": ([[[0]], [[0]]], [[[0]], [[0]]])},
+                                [[[0], [0]], [[0], [0]]])), \
+             patch('experiments.pyvene_core._delete_intervenable_model'):
+            
+            config = {"batch_size": 2}
+            
+            result = _collect_features(
+                mock_counterfactual_dataset,
+                mock_tiny_lm,
+                attention_head_units,
+                config
+            )
+            
+            # Verify correct processing of attention heads
+            assert len(result) == 1  # One group
+            assert len(result[0]) == 2  # Two heads in group
+            
+            # Each head should have extracted activations with shape (total_samples, head_dim)
+            for head_activations in result[0]:
+                assert head_activations.shape[1] == 8  # head_dim = 8
+                assert head_activations.shape[0] > 0  # Should have some samples
+    
+    def test_residual_stream_activation_processing(self, mock_tiny_lm, residual_stream_units,
+                                                  mock_counterfactual_dataset, mock_loaded_inputs):
+        """Test processing of 3D residual stream activations in pyvene 0.1.8+ format."""
+        base_loaded, cf_loaded = mock_loaded_inputs
+        
+        # Mock pyvene 0.1.8+ format: one tensor per unit with 3D shape
+        # Shape: (batch_size=2, seq_len=1, hidden_dim=32)
+        mock_activations = [
+            torch.randn(2, 1, 32),  # First residual stream unit
+            torch.randn(2, 1, 32)   # Second residual stream unit
+        ]
+        
+        mock_model = MagicMock()
+        mock_model.side_effect = lambda *args, **kwargs: (
+            (MagicMock(), mock_activations), None
+        )
+        
+        with patch('experiments.pyvene_core._prepare_intervenable_model',
+                  return_value=mock_model), \
+             patch('experiments.pyvene_core._prepare_intervenable_inputs',
+                   return_value=(base_loaded, cf_loaded,
+                                {"sources->base": ([[[0]], [[0]]], [[[0]], [[0]]])},
+                                [[[0], [0]], [[0], [0]]])), \
+             patch('experiments.pyvene_core._delete_intervenable_model'):
+            
+            config = {"batch_size": 2}
+            
+            result = _collect_features(
+                mock_counterfactual_dataset,
+                mock_tiny_lm,
+                residual_stream_units,
+                config
+            )
+            
+            # Verify correct processing of residual streams
+            assert len(result) == 1  # One group
+            assert len(result[0]) == 2  # Two units in group
+            
+            # Each unit should have squeezed activations with shape (total_samples, hidden_dim)
+            for unit_activations in result[0]:
+                assert unit_activations.shape[1] == 32  # hidden_dim = 32
+                assert unit_activations.shape[0] > 0  # Should have some samples
+    
+    def test_mixed_activation_shapes(self, mock_tiny_lm, mock_counterfactual_dataset, mock_loaded_inputs):
+        """Test handling of different activation shapes in the same call."""
+        base_loaded, cf_loaded = mock_loaded_inputs
+        
+        # Mixed units: some 2D, some 3D
+        class MockUnit:
+            def __init__(self, unit_id):
+                self.id = unit_id
+        
+        mixed_units = [[MockUnit("Unit1"), MockUnit("Unit2")]]
+        
+        # Mock different shapes: 2D and 3D
+        mock_activations = [
+            torch.randn(2, 64),     # Already 2D: (batch_size, feature_dim)
+            torch.randn(2, 1, 32)   # 3D: (batch_size, seq_len, hidden_dim)
+        ]
+        
+        mock_model = MagicMock()
+        mock_model.side_effect = lambda *args, **kwargs: (
+            (MagicMock(), mock_activations), None
+        )
+        
+        with patch('experiments.pyvene_core._prepare_intervenable_model',
+                  return_value=mock_model), \
+             patch('experiments.pyvene_core._prepare_intervenable_inputs',
+                   return_value=(base_loaded, cf_loaded,
+                                {"sources->base": ([[[0]], [[0]]], [[[0]], [[0]]])},
+                                [[[0], [0]], [[0], [0]]])), \
+             patch('experiments.pyvene_core._delete_intervenable_model'):
+            
+            config = {"batch_size": 2}
+            
+            result = _collect_features(
+                mock_counterfactual_dataset,
+                mock_tiny_lm,
+                mixed_units,
+                config
+            )
+            
+            # Verify both shapes are handled correctly
+            assert len(result) == 1
+            assert len(result[0]) == 2
+            
+            # First unit (2D) should remain unchanged
+            assert result[0][0].shape[1] == 64
+            assert result[0][0].shape[0] > 0
+            
+            # Second unit (3D) should be squeezed
+            assert result[0][1].shape[1] == 32
+            assert result[0][1].shape[0] > 0
+    
+    def test_old_format_compatibility(self, mock_tiny_lm, residual_stream_units,
+                                     mock_counterfactual_dataset, mock_loaded_inputs):
+        """Test that old pyvene format still works."""
+        base_loaded, cf_loaded = mock_loaded_inputs
+        
+        # Mock old format: flat list with one activation per (unit, sample)
+        # 2 units * 2 batch_size = 4 total activations
+        mock_activations = [
+            torch.randn(32) for _ in range(4)  # Flat list of 1D tensors
+        ]
+        
+        mock_model = MagicMock()
+        mock_model.side_effect = lambda *args, **kwargs: (
+            (MagicMock(), mock_activations), None
+        )
+        
+        with patch('experiments.pyvene_core._prepare_intervenable_model',
+                  return_value=mock_model), \
+             patch('experiments.pyvene_core._prepare_intervenable_inputs',
+                   return_value=(base_loaded, cf_loaded,
+                                {"sources->base": ([[[0]], [[0]]], [[[0]], [[0]]])},
+                                [[[0], [0]], [[0], [0]]])), \
+             patch('experiments.pyvene_core._delete_intervenable_model'):
+            
+            config = {"batch_size": 2}
+            
+            result = _collect_features(
+                mock_counterfactual_dataset,
+                mock_tiny_lm,
+                residual_stream_units,
+                config
+            )
+            
+            # Verify old format processing works
+            assert len(result) == 1
+            assert len(result[0]) == 2
+            
+            # Should stack the flat activations correctly
+            for unit_activations in result[0]:
+                assert unit_activations.shape[1] == 32  # hidden_dim = 32
+                assert unit_activations.shape[0] > 0  # Should have some samples
 
 
 class TestDeleteIntervenableModel:
