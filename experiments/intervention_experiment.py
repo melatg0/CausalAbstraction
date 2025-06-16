@@ -207,6 +207,8 @@ class InterventionExperiment:
         Returns:
             Tuple of paths to the saved featurizer, inverse featurizer, and indices files
         """
+        if model_units is None or len(model_units) == 0:
+            model_units = [model_unit for model_units_list in self.model_units_lists for model_units in model_units_list for model_unit in model_units]
         if not os.path.exists(model_dir):
             os.makedirs(model_dir)
         f_dirs, invf_dirs, indices_dir = [], [], []
@@ -450,6 +452,6 @@ class InterventionExperiment:
             
             # Save trained models if directory provided
             if model_dir is not None:
-                self.save_featurizers(model_units, model_dir)
+                self.save_featurizers([model_unit for model_units in model_units_list for model_unit in model_units], model_dir) 
                 
         return self
