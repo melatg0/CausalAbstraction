@@ -67,8 +67,9 @@ class TestCollectFeatures:
         # Mock the model return structure: (base_outputs, collected_activations), counterfactual_outputs
         # collected_activations should be a list of tensors
         def model_side_effect(*args, **kwargs):
-            # Return 4 activation tensors (2 model units * 2 batch size)
-            activations = [torch.randn(1, 32) for _ in range(4)]
+            # Return 2 activation tensors (one per model unit, each with batch_size samples)
+            # New pyvene 0.1.8+ format: one tensor per unit containing all batch samples
+            activations = [torch.randn(2, 32) for _ in range(2)]  # 2 units, each with batch_size=2 samples
             return (MagicMock(), activations), None
         
         model.side_effect = model_side_effect
@@ -143,7 +144,7 @@ class TestCollectFeatures:
         def model_side_effect(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            activations = [torch.randn(1, 32) for _ in range(4)]
+            activations = [torch.randn(2, 32) for _ in range(2)]  # 2 units, each with batch_size=2 samples
             return (MagicMock(), activations), None
         
         mock_model = MagicMock(side_effect=model_side_effect)
@@ -194,7 +195,7 @@ class TestCollectFeatures:
         
         mock_model = MagicMock()
         mock_model.side_effect = lambda *args, **kwargs: (
-            (MagicMock(), [torch.randn(1, 32) for _ in range(4)]), None
+            (MagicMock(), [torch.randn(2, 32) for _ in range(2)]), None  # 2 units, each with batch_size=2 samples
         )
         
         with patch('experiments.pyvene_core._prepare_intervenable_model',
@@ -235,7 +236,7 @@ class TestCollectFeatures:
         mock_model.side_effect = lambda inputs, unit_locations=None, **kwargs: [
             (
                 MagicMock(),
-                [torch.randn(1, 32, device=device) for _ in range(4)]
+                [torch.randn(2, 32, device=device) for _ in range(2)]  # 2 units, each with batch_size=2 samples
             ),
             None
         ]
@@ -272,7 +273,7 @@ class TestCollectFeatures:
         
         mock_model = MagicMock()
         mock_model.side_effect = lambda *args, **kwargs: (
-            (MagicMock(), [torch.randn(1, 32) for _ in range(4)]), None
+            (MagicMock(), [torch.randn(2, 32) for _ in range(2)]), None  # 2 units, each with batch_size=2 samples
         )
         
         # Patch DataLoader at the module level where it's imported
@@ -508,47 +509,6 @@ class TestCollectFeaturesPyvene18Plus:
             assert result[0][1].shape[1] == 32
             assert result[0][1].shape[0] > 0
     
-    def test_old_format_compatibility(self, mock_tiny_lm, residual_stream_units,
-                                     mock_counterfactual_dataset, mock_loaded_inputs):
-        """Test that old pyvene format still works."""
-        base_loaded, cf_loaded = mock_loaded_inputs
-        
-        # Mock old format: flat list with one activation per (unit, sample)
-        # 2 units * 2 batch_size = 4 total activations
-        mock_activations = [
-            torch.randn(32) for _ in range(4)  # Flat list of 1D tensors
-        ]
-        
-        mock_model = MagicMock()
-        mock_model.side_effect = lambda *args, **kwargs: (
-            (MagicMock(), mock_activations), None
-        )
-        
-        with patch('experiments.pyvene_core._prepare_intervenable_model',
-                  return_value=mock_model), \
-             patch('experiments.pyvene_core._prepare_intervenable_inputs',
-                   return_value=(base_loaded, cf_loaded,
-                                {"sources->base": ([[[0]], [[0]]], [[[0]], [[0]]])},
-                                [[[0], [0]], [[0], [0]]])), \
-             patch('experiments.pyvene_core._delete_intervenable_model'):
-            
-            config = {"batch_size": 2}
-            
-            result = _collect_features(
-                mock_counterfactual_dataset,
-                mock_tiny_lm,
-                residual_stream_units,
-                config
-            )
-            
-            # Verify old format processing works
-            assert len(result) == 1
-            assert len(result[0]) == 2
-            
-            # Should stack the flat activations correctly
-            for unit_activations in result[0]:
-                assert unit_activations.shape[1] == 32  # hidden_dim = 32
-                assert unit_activations.shape[0] > 0  # Should have some samples
 
 
 class TestDeleteIntervenableModel:
