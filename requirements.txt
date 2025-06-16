@@ -3,7 +3,7 @@ networkx
 matplotlib
 pandas
 numpy
-pyvene==0.1.7
+pyvene
 pytest
 scikit-learn
 ipywidgets
