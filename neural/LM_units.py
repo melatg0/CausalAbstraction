@@ -127,7 +127,7 @@ class AttentionHead(AtomicModelUnit):
         )
 
         tok_id = token_indices.id if isinstance(token_indices, ComponentIndexer) else token_indices
-        uid = f"AttentionHead(Layer:{layer},Token:{tok_id})"
+        uid = f"AttentionHead(Layer:{layer},Head:{head},Token:{tok_id})"
 
         unit = "h.pos"
 
