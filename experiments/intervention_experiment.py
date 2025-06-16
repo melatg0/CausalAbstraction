@@ -283,9 +283,29 @@ class InterventionExperiment:
             counterfactual_dataset += dataset
         
         
+        #  To understand this, let's break down the structure:
+
+        #   1. self.model_units_lists is a triple-nested list with structure:
+        #     - Outermost: Different intervention experiments
+        #     - Middle: Groups of units sharing the same counterfactual input
+        #     - Innermost: Individual model units to intervene on
+        #   2. zip(*self.model_units_lists) transposes the outermost dimension,
+        #      grouping together units from the same position across all experiments.
+        #   3. chain.from_iterable flattens the middle and inner dimensions into a single list.
+
+        #   Result: zipped_model_units is a list where each element contains all model units that share 
+        #   the same counterfactual input position across all experiments, flattened into a single list.
+
+        #   For example, if self.model_units_lists has shape [2, 3, 4] (2 experiments, 3 counterfactual groups, 4 units each), 
+        #   then zipped_model_units would have shape [3, 8] (3 counterfactual groups, 8 units total from both experiments).
+
         zipped_model_units = [list(chain.from_iterable(model_units_list)) 
                               for model_units_list in zip(*self.model_units_lists)]
 
+        # The features variable returned by _collect_features has the following structure:
+        # 1. Outer dimension: Corresponds to the groups in zipped_model_units (same as middle dimension of self.model_units_lists)
+        # 2. Middle dimension: Corresponds to individual model units within each group
+        # 3. Inner structure: Each element is a PyTorch tensor with shape (n_samples, n_features)
         features = _collect_features(
             counterfactual_dataset,
             self.pipeline,
@@ -294,46 +314,30 @@ class InterventionExperiment:
             collect_counterfactuals=collect_counterfactuals,
             verbose=verbose
         )
-            
+
+        # Restructure features to match the original model_units_lists structure
+        # This is necessary because _collect_features returns a flat list of features
+        # where each element corresponds to a model unit in zipped_model_units.
+        # We need to map these back to the original nested structure of model_units_lists.
+        # 1. Outer dimension: Different intervention experiments
+        # 2. Middle dimension: Groups of model units sharing the same counterfactual input
+        # 3. Inner dimension: Individual model units within each group
+        restructured_features = []
+        for i, model_units_list in enumerate(self.model_units_lists):
+            experiment_features = []
+            for j, model_units in enumerate(model_units_list):
+                start = sum(len(self.model_units_lists[k][j]) for k in range(i))
+                end = start + len(model_units)
+                experiment_features.append(features[j][start:end])
+            restructured_features.append(experiment_features)
+        features = restructured_features
+
+        
+                    
         for i, model_units_list in enumerate(self.model_units_lists):
             for j, model_units in enumerate(model_units_list):
-                start = sum([len(model_unit_list[j]) for model_unit_list in self.model_units_lists[:i]])
-                end = start + len(model_units_list[j])
-                if flatten:
-                    for k, model_unit in enumerate(model_units):
-                        X = features[j][start:end][k]
-                        # Calculate maximum possible components (min of sample count and feature dimension, minus 1)
-                        n = min(X.shape[0], X.shape[1]) - 1
-                        n = min(n, n_components) if n_components is not None else n
-                        
-                        # Normalize input features if using PCA
-                        if PCA:
-                            pca_mean = X.mean(axis=0, keepdim=True)
-                            pca_std = X.var(axis=0)**0.5
-                            epsilon = 1e-6  # Prevent division by zero
-                            pca_std = np.where(pca_std < epsilon, epsilon, pca_std)
-                            X = (X - pca_mean) / pca_std
-                        
-                        # Perform SVD/PCA
-                        svd = TruncatedSVD(n_components=n, algorithm=algorithm)
-                        svd.fit(X)
-                        components = svd.components_.copy()
-                        rotation = torch.tensor(components).to(X.dtype)
-                        
-                        if verbose:
-                            print(f'SVD explained variance: {[round(float(x),2) for x in svd.explained_variance_ratio_]}')
-
-                        model_unit.set_featurizer(
-                            SubspaceFeaturizer(
-                                rotation_subspace=rotation.T,
-                                trainable=False,
-                                id="SVD"
-                            )
-                        )
-                        model_unit.set_feature_indices(None)  # Use all components initially
-                else:
-                    X = torch.cat(features[j][start:end])
-                    print(j, start, end)
+                for k, model_unit in enumerate(model_units):
+                    X = features[i][j][k]
                     # Calculate maximum possible components (min of sample count and feature dimension, minus 1)
                     n = min(X.shape[0], X.shape[1]) - 1
                     n = min(n, n_components) if n_components is not None else n
@@ -355,15 +359,14 @@ class InterventionExperiment:
                     if verbose:
                         print(f'SVD explained variance: {[round(float(x),2) for x in svd.explained_variance_ratio_]}')
 
-                    for model_unit in model_units:
-                        model_unit.set_featurizer(
-                            SubspaceFeaturizer(
-                                rotation_subspace=rotation.T,
-                                trainable=False,
-                                id="SVD"
-                            )
+                    model_unit.set_featurizer(
+                        SubspaceFeaturizer(
+                            rotation_subspace=rotation.T,
+                            trainable=False,
+                            id="SVD"
                         )
-                        model_unit.set_feature_indices(None)  # Use all components initially
+                    )
+                    model_unit.set_feature_indices(None)  # Use all components initially
                 
 
     def train_interventions(self, datasets, target_variables, method="DAS", model_dir=None, verbose=False):

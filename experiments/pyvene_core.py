@@ -452,56 +452,8 @@ def _collect_features(dataset, pipeline, model_units_list, config, verbose=False
                 for i in range(len(model_units_list)):
                     for j in range(len(model_units_list[i])):
                         unit_activations = activations_list[activation_idx]
-                        
-                        if len(unit_activations.shape) == 4:
-                            # Attention heads: shape (batch_size, seq_len, num_heads, head_dim)
-                            batch_size, seq_len, num_heads, head_dim = unit_activations.shape
-                            model_unit = model_units_list[i][j]
-                            
-                            if hasattr(model_unit, 'head'):
-                                # Extract specific head: (batch_size, seq_len, head_dim)
-                                head_idx = model_unit.head
-                                activations = unit_activations[:, :, head_idx, :]
-                                if seq_len == 1:
-                                    activations = activations.squeeze(1)  # (batch_size, head_dim)
-                            else:
-                                # Concatenate all heads: (batch_size, seq_len, num_heads * head_dim)
-                                activations = unit_activations.reshape(batch_size, seq_len, num_heads * head_dim)
-                                if seq_len == 1:
-                                    activations = activations.squeeze(1)  # (batch_size, num_heads * head_dim)
-                                    
-                        elif len(unit_activations.shape) == 3:
-                            # Residual stream/MLP: shape (batch_size, seq_len, hidden_dim)
-                            if unit_activations.shape[1] == 1:
-                                activations = unit_activations.squeeze(1)  # (batch_size, hidden_dim)
-                            else:
-                                # Multiple positions: flatten (batch_size, seq_len * hidden_dim)
-                                batch_size = unit_activations.shape[0]
-                                activations = unit_activations.reshape(batch_size, -1)
-                                
-                        elif len(unit_activations.shape) == 2:
-                            # Already correct shape: (batch_size, feature_dim)
-                            activations = unit_activations
-                        else:
-                            raise ValueError(f"Unexpected activation shape: {unit_activations.shape}")
-                        
-                        data_container[i][j].extend(activations.cpu())
-                        activation_idx += 1
-                        
-            elif len(activations_list) == total_units * batch_len:
-                # Older pyvene format: flat list with one activation per (unit, sample) pair
-                activation_idx = 0
-                for i in range(len(model_units_list)):
-                    for j in range(len(model_units_list[i])):
-                        start = activation_idx * batch_len
-                        end = (activation_idx + 1) * batch_len
-                        
-                        activations = activations_list[start:end]
-                        if len(activations[0].shape) == 3:
-                            activations = torch.cat(activations)
-                        else:
-                            activations = torch.stack(activations)
-
+                        hidden_size = unit_activations.shape[-1]
+                        activations = unit_activations.reshape(-1, hidden_size)
                         data_container[i][j].extend(activations.cpu())
                         activation_idx += 1
             else:
