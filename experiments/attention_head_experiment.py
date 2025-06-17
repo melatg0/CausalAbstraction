@@ -72,7 +72,7 @@ class PatchAttentionHeads(InterventionExperiment):
         model_units = []
         for layer, head in layer_head_list:
             # Get or create featurizer for this head
-            featurizer_key = (layer, head, "all")  # Using "all" as default position id
+            featurizer_key = (layer, head) 
             featurizer = self.featurizers.get(
                 featurizer_key,
                 Featurizer(n_features=head_size)
