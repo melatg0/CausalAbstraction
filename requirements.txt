@@ -1,5 +1,6 @@
 torch
 networkx
+sae_lens
 matplotlib
 pandas
 numpy
@@ -10,4 +11,4 @@ ipywidgets
 jupyterlab
 ipycytoscape
 seaborn
-sae_lens
+transformers
