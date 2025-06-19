@@ -147,6 +147,8 @@ class CausalModel:
         width = {_: 0 for _ in range(len(self.variables))}
         if self.print_pos is None:
             self.print_pos = dict()
+        if "raw_input" not in self.print_pos:
+            self.print_pos["raw_input"] =  (0, -2)
         for var in self.variables:
             if var not in self.print_pos:
                 self.print_pos[var] = (width[self.timesteps[var]], self.timesteps[var])
