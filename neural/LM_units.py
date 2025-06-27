@@ -90,7 +90,7 @@ class ResidualStream(AtomicModelUnit):
     ):
         component_type = "block_output" if target_output else "block_input"
         tok_id = token_indices.id if isinstance(token_indices, ComponentIndexer) else token_indices
-        uid = f"ResidualStream(Layer:{layer},Token:{tok_id})"
+        uid = f"ResidualStream(Layer-{layer},Token-{tok_id})"
 
         unit = "pos"
         if isinstance(token_indices, list):
@@ -127,7 +127,7 @@ class AttentionHead(AtomicModelUnit):
         )
 
         tok_id = token_indices.id if isinstance(token_indices, ComponentIndexer) else token_indices
-        uid = f"AttentionHead(Layer:{layer},Head:{head},Token:{tok_id})"
+        uid = f"AttentionHead(Layer-{layer},Head-{head},Token-{tok_id})"
 
         unit = "h.pos"
 
