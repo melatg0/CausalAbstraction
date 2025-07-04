@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import MagicMock, patch, call, ANY
 
 from experiments.intervention_experiment import InterventionExperiment
-from neural.featurizers import SubspaceFeaturizer
+from experiments.config import DEFAULT_CONFIG
 
 
 class TestInterventionExperiment:
@@ -30,13 +30,17 @@ class TestInterventionExperiment:
         assert exp.causal_model == mcqa_causal_model
         assert exp.model_units_lists == model_units_list
         assert exp.checker == checker
-        assert exp.config.get("batch_size") == 32
-        assert exp.config.get("evaluation_batch_size") == 32
-        assert exp.config.get("method_name") == "InterventionExperiment"
-        assert exp.config.get("output_scores") is False
-        assert exp.config.get("check_raw") is False
         
-        # Test with custom config
+        # Verify default config values from DEFAULT_CONFIG
+        assert exp.config.get("batch_size") == DEFAULT_CONFIG["batch_size"]
+        assert exp.config.get("evaluation_batch_size") == DEFAULT_CONFIG["evaluation_batch_size"]
+        assert exp.config.get("method_name") == DEFAULT_CONFIG["method_name"]
+        assert exp.config.get("output_scores") == DEFAULT_CONFIG["output_scores"]
+        assert exp.config.get("check_raw") == DEFAULT_CONFIG["check_raw"]
+        assert exp.config.get("training_epoch") == DEFAULT_CONFIG["training_epoch"]
+        assert exp.config.get("n_features") == DEFAULT_CONFIG["n_features"]
+        
+        # Test with custom config that overrides some defaults
         custom_config = {
             "batch_size": 4,
             "evaluation_batch_size": 8,
@@ -53,7 +57,61 @@ class TestInterventionExperiment:
             config=custom_config
         )
         
-        assert exp.config == custom_config
+        # Verify custom values override defaults
+        assert exp.config["batch_size"] == 4
+        assert exp.config["evaluation_batch_size"] == 8
+        assert exp.config["method_name"] == "CustomMethod"
+        assert exp.config["output_scores"] is True
+        assert exp.config["check_raw"] is True
+        
+        # Verify other defaults are still present
+        assert exp.config["training_epoch"] == DEFAULT_CONFIG["training_epoch"]
+        assert exp.config["n_features"] == DEFAULT_CONFIG["n_features"]
+        assert exp.config["init_lr"] == DEFAULT_CONFIG["init_lr"]
+
+    def test_config_overrides(self, mock_tiny_lm, mcqa_causal_model, model_units_list):
+        """Test configuration override behavior."""
+        checker = lambda x, y: x == y
+        
+        # Test with DAS-style configuration
+        das_config = {
+            "method_name": "DAS",
+            "n_features": 16,
+            "training_epoch": 8,
+            "regularization_coefficient": 0.0,
+        }
+        exp = InterventionExperiment(
+            pipeline=mock_tiny_lm,
+            causal_model=mcqa_causal_model,
+            model_units_lists=model_units_list,
+            checker=checker,
+            config=das_config
+        )
+        
+        assert exp.config["method_name"] == "DAS"
+        assert exp.config["n_features"] == 16
+        assert exp.config["regularization_coefficient"] == 0.0
+        # Should still have defaults for other params
+        assert exp.config["batch_size"] == DEFAULT_CONFIG["batch_size"]
+        
+        # Test with quick test style configuration
+        quick_config = {
+            "batch_size": 8,
+            "training_epoch": 1,
+            "n_features": 8,
+            "method_name": "quick_test",
+        }
+        exp = InterventionExperiment(
+            pipeline=mock_tiny_lm,
+            causal_model=mcqa_causal_model,
+            model_units_lists=model_units_list,
+            checker=checker,
+            config=quick_config
+        )
+        
+        assert exp.config["batch_size"] == 8
+        assert exp.config["training_epoch"] == 1
+        assert exp.config["n_features"] == 8
 
     @patch('experiments.intervention_experiment._run_interchange_interventions')
     def test_perform_interventions(self, mock_run_interventions, 
@@ -70,16 +128,17 @@ class TestInterventionExperiment:
         # Define checker that always returns 1.0 for testing
         checker = lambda x, y: 1.0
         
-        # Create experiment with batch_size in config
+        # Create experiment with a test config
+        test_config = {"method_name": "TestMethod"}
         exp = InterventionExperiment(
             pipeline=mock_tiny_lm,
             causal_model=mcqa_causal_model,
             model_units_lists=model_units_list,
             checker=checker,
-            config={"method_name": "TestMethod", "batch_size": 32}
+            config=test_config
         )
         
-        # FIXED: Mock the label_counterfactual_data method to return properly structured data
+        # Mock the label_counterfactual_data method to return properly structured data
         with patch.object(mcqa_causal_model, 'label_counterfactual_data') as mock_label:
             # Create proper mock data that matches what the method expects
             mock_labeled_dataset = []
@@ -104,8 +163,8 @@ class TestInterventionExperiment:
                     counterfactual_dataset=mcqa_counterfactual_datasets["random_letter_test"],
                     model_units_list=unit_list,
                     verbose=True,
-                    output_scores=False,
-                    batch_size=32
+                    output_scores=exp.config["output_scores"],
+                    batch_size=exp.config["evaluation_batch_size"]
                 ))
             mock_run_interventions.assert_has_calls(expected_calls)
             
@@ -113,7 +172,7 @@ class TestInterventionExperiment:
             assert results["method_name"] == "TestMethod"
             assert "random_letter_test" in results["dataset"]
             
-            # FIXED: Verify that label_counterfactual_data was called with correct arguments
+            # Verify that label_counterfactual_data was called with correct arguments
             mock_label.assert_called_with(
                 mcqa_counterfactual_datasets["random_letter_test"], 
                 ["answer_pointer"]
@@ -150,8 +209,7 @@ class TestInterventionExperiment:
             pipeline=mock_tiny_lm,
             causal_model=mcqa_causal_model,
             model_units_lists=model_units_list,
-            checker=lambda x, y: x == y,
-            config={"batch_size": 32}
+            checker=lambda x, y: x == y
         )
         
         # Extract atomic model unit (not the list) 
@@ -191,8 +249,7 @@ class TestInterventionExperiment:
                 pipeline=mock_tiny_lm,
                 causal_model=mcqa_causal_model,
                 model_units_lists=test_model_units_list,
-                checker=lambda x, y: x == y,
-                config={"batch_size": 32}
+                checker=lambda x, y: x == y
             )
             
             # Set up mock to return an empty list of featurizers
@@ -214,19 +271,25 @@ class TestInterventionExperiment:
                                mock_tiny_lm, mcqa_causal_model, 
                                model_units_list, mcqa_counterfactual_datasets):
         """Test the train_interventions method with patched implementation."""
-        # Create experiment
+        # Create experiment with DAS-style config
+        das_config = {
+            "method_name": "DAS",
+            "n_features": 16,
+            "training_epoch": 8,
+            "regularization_coefficient": 0.0,
+        }
         exp = InterventionExperiment(
             pipeline=mock_tiny_lm,
             causal_model=mcqa_causal_model,
             model_units_lists=model_units_list,
             checker=lambda x, y: x == y,
-            config={"batch_size": 32}
+            config=das_config
         )
         
         # Add the required loss_and_metric_fn attribute
         exp.loss_and_metric_fn = MagicMock()
         
-        # FIXED: Mock the label_counterfactual_data method to avoid the iteration issue
+        # Mock the label_counterfactual_data method to avoid the iteration issue
         with patch.object(mcqa_causal_model, 'label_counterfactual_data') as mock_label:
             # Create a simple labeled dataset
             mock_labeled_dataset = [{"input": "test", "label": "A"}]
@@ -257,19 +320,57 @@ class TestInterventionExperiment:
                 # Verify method chaining works
                 assert result == exp
 
-    def test_invalid_method(self, mock_tiny_lm, mcqa_causal_model, 
-                        model_units_list, mcqa_counterfactual_datasets):
-        """Test that an invalid method raises an error."""
-        # Create experiment 
+    def test_training_parameter_validation(self, mock_tiny_lm, mcqa_causal_model, 
+                                         model_units_list, mcqa_counterfactual_datasets):
+        """Test that missing required training parameters raise an error."""
+        # Create a config missing required training parameters
+        incomplete_config = {
+            "batch_size": 32,
+            "method_name": "TestMethod"
+        }
+        # Remove required training params to test validation
+        for key in ["training_epoch", "init_lr", "n_features"]:
+            if key in incomplete_config:
+                del incomplete_config[key]
+        
+        # Create experiment
         exp = InterventionExperiment(
             pipeline=mock_tiny_lm,
             causal_model=mcqa_causal_model,
             model_units_lists=model_units_list,
             checker=lambda x, y: x == y,
-            config={"batch_size": 32}
+            config=incomplete_config
         )
         
-        # FIXED: Mock the entire method to avoid iteration issues
+        # Since the DEFAULT_CONFIG is now used, all required params should be present
+        # So we need to manually remove them to test validation
+        with patch.object(exp, 'config', incomplete_config):
+            # Mock the label_counterfactual_data to avoid unrelated errors
+            with patch.object(mcqa_causal_model, 'label_counterfactual_data') as mock_label:
+                mock_label.return_value = []
+                
+                # Test that missing required parameters raise ValueError
+                with pytest.raises(ValueError) as exc_info:
+                    exp.train_interventions(
+                        {"test": mcqa_counterfactual_datasets["random_letter_test"]},
+                        target_variables=["answer_pointer"],
+                        method="DAS"
+                    )
+                
+                assert "Required training parameter" in str(exc_info.value)
+
+    def test_invalid_method(self, mock_tiny_lm, mcqa_causal_model, 
+                        model_units_list, mcqa_counterfactual_datasets):
+        """Test that an invalid method raises an error."""
+        # Create experiment
+        exp = InterventionExperiment(
+            pipeline=mock_tiny_lm,
+            causal_model=mcqa_causal_model,
+            model_units_lists=model_units_list,
+            checker=lambda x, y: x == y
+        )
+        
+        # Mock the entire method to avoid iteration issues
         def simplified_train_interventions(self, datasets, target_variables, method="DAS", model_dir=None, verbose=False):
             # Only do method validation, then return
             assert method in ["DAS", "DBM"]
@@ -284,3 +385,59 @@ class TestInterventionExperiment:
                     target_variables=["answer_pointer"],
                     method="INVALID_METHOD"
                 )
+
+    def test_evaluation_batch_size_default(self, mock_tiny_lm, mcqa_causal_model, model_units_list):
+        """Test that evaluation_batch_size behavior with different configurations."""
+        # When no config is provided, both should use DEFAULT_CONFIG values
+        exp = InterventionExperiment(
+            pipeline=mock_tiny_lm,
+            causal_model=mcqa_causal_model,
+            model_units_lists=model_units_list,
+            checker=lambda x, y: x == y
+        )
+        
+        # Both should be from DEFAULT_CONFIG
+        assert exp.config["evaluation_batch_size"] == DEFAULT_CONFIG["evaluation_batch_size"]
+        assert exp.config["batch_size"] == DEFAULT_CONFIG["batch_size"]
+        
+        # When providing custom batch_size but not evaluation_batch_size,
+        # evaluation_batch_size comes from DEFAULT_CONFIG
+        config = {"batch_size": 64}
+        exp = InterventionExperiment(
+            pipeline=mock_tiny_lm,
+            causal_model=mcqa_causal_model,
+            model_units_lists=model_units_list,
+            checker=lambda x, y: x == y,
+            config=config
+        )
+        
+        # batch_size should be overridden, evaluation_batch_size from DEFAULT_CONFIG
+        assert exp.config["batch_size"] == 64
+        assert exp.config["evaluation_batch_size"] == DEFAULT_CONFIG["evaluation_batch_size"]
+        
+        # Test with explicit None evaluation_batch_size - should default to batch_size
+        config = {"batch_size": 128, "evaluation_batch_size": None}
+        exp = InterventionExperiment(
+            pipeline=mock_tiny_lm,
+            causal_model=mcqa_causal_model,
+            model_units_lists=model_units_list,
+            checker=lambda x, y: x == y,
+            config=config
+        )
+        
+        # evaluation_batch_size should be set to batch_size when explicitly None
+        assert exp.config["evaluation_batch_size"] == 128
+        
+        # Test with both specified explicitly
+        config = {"batch_size": 64, "evaluation_batch_size": 256}
+        exp = InterventionExperiment(
+            pipeline=mock_tiny_lm,
+            causal_model=mcqa_causal_model,
+            model_units_lists=model_units_list,
+            checker=lambda x, y: x == y,
+            config=config
+        )
+        
+        # Both should be as specified
+        assert exp.config["batch_size"] == 64
+        assert exp.config["evaluation_batch_size"] == 256
