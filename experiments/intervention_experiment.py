@@ -166,8 +166,7 @@ class InterventionExperiment:
 
 
                 # Remove raw_outputs to save memory in the results dictionary
-                # But keep them if output_scores is True
-                if not self.config["output_scores"]:
+                if not self.config["raw_outputs"]:
                     del results["dataset"][dataset_name]["model_unit"][str(model_units_list)]["raw_outputs"]
 
         if save_dir is not None:

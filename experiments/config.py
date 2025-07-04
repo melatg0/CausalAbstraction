@@ -58,6 +58,9 @@ DEFAULT_CONFIG = {
     
     # Whether to shuffle training data
     "shuffle": True,
+
+    # Whether to save raw_outputs in the results
+    "raw_outputs": False
 }
 
 # Preset configurations for common experiments
