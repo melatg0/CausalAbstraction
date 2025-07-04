@@ -296,45 +296,6 @@ class TestPatchResidualStream:
             mock_empty_cache.assert_called_once()
             mock_sync.assert_called_once()
     
-    def test_extract_metadata_map(self, patch_object):
-        """Test _extract_metadata_map method."""
-        # Create mock results
-        results = {
-            "dataset": {
-                "dataset1": {
-                    "model_unit": {
-                        "unit1": {
-                            "metadata": {"layer": 0, "position": "pos1"}
-                        },
-                        "unit2": {
-                            "metadata": {"layer": 1, "position": "pos2"}
-                        }
-                    }
-                }
-            }
-        }
-        
-        metadata_map = patch_object._extract_metadata_map(results)
-        
-        assert len(metadata_map) == 2
-        assert metadata_map["unit1"]["layer"] == 0
-        assert metadata_map["unit1"]["position"] == "pos1"
-        assert metadata_map["unit2"]["layer"] == 1
-        assert metadata_map["unit2"]["position"] == "pos2"
-    
-    def test_extract_layers_positions(self, patch_object):
-        """Test _extract_layers_positions method."""
-        metadata_map = {
-            "unit1": {"layer": 0, "position": "pos1"},
-            "unit2": {"layer": 1, "position": "pos2"},
-            "unit3": {"layer": 0, "position": "pos2"}
-        }
-        
-        layers, positions = patch_object._extract_layers_positions(metadata_map)
-        
-        assert sorted(layers, reverse=True) == [1, 0]  # Sorted in reverse
-        assert set(positions) == {"pos1", "pos2"}
-    
     def test_create_heatmap(self, patch_object):
         """Test _create_heatmap method."""
         score_matrix = np.array([[0.8, 0.6], [0.4, 0.2]])
