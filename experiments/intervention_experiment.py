@@ -18,6 +18,7 @@ from neural.pipeline import Pipeline
 from causal.causal_model import CausalModel
 from causal.counterfactual_dataset import CounterfactualDataset
 from experiments.pyvene_core import _run_interchange_interventions, _train_intervention, _collect_features
+from experiments.config import DEFAULT_CONFIG
 
 class InterventionExperiment:
     """
@@ -61,15 +62,15 @@ class InterventionExperiment:
         self.model_units_lists = model_units_lists
         self.checker = checker
         self.metadata_fn = metadata_fn
-        self.config = {"batch_size": 32} if config is None else config 
-        if "evaluation_batch_size" not in self.config:
+        
+        # Use DEFAULT_CONFIG as base and merge with provided config
+        self.config = DEFAULT_CONFIG.copy()
+        if config is not None:
+            self.config.update(config)
+        
+        # Ensure evaluation_batch_size defaults to batch_size if not set
+        if self.config.get("evaluation_batch_size") is None:
             self.config["evaluation_batch_size"] = self.config["batch_size"]
-        if "method_name" not in self.config:
-            self.config["method_name"] = "InterventionExperiment"
-        if "output_scores" not in self.config:
-            self.config["output_scores"] = False 
-        if "check_raw" not in self.config:
-            self.config["check_raw"] = False
 
     def perform_interventions(self, datasets, verbose: bool = False, target_variables_list: List[List[str]] = None, save_dir=None) -> Dict:
         """
@@ -406,21 +407,12 @@ class InterventionExperiment:
         for dataset in datasets.values():
             counterfactual_dataset += self.causal_model.label_counterfactual_data(dataset, target_variables)
 
-        # Set default training configuration if not specified
-        defaults = {
-            "training_epoch": 3,
-            "init_lr": 1e-2,
-            "regularization_coefficient": 1e-4,
-            "max_output_tokens": 1,
-            "log_dir": "logs",
-            "n_features": 32,
-            "temperature_schedule": (1.0, 0.01),
-            "batch_size": 32
-        }
-
-        for key, value in defaults.items():
-            if key not in self.config:
-                self.config[key] = value 
+        # The config now comes from DEFAULT_CONFIG, so we don't need to set defaults here
+        # Just validate that required training parameters are present
+        required_params = ["training_epoch", "init_lr", "n_features"]
+        for param in required_params:
+            if param not in self.config:
+                raise ValueError(f"Required training parameter '{param}' not found in config") 
 
         # Validate method
         assert method in ["DAS", "DBM"]
