@@ -60,7 +60,7 @@ DEFAULT_CONFIG = {
     "shuffle": True,
 
     # Whether to save raw_outputs in the results
-    "raw_outputs": False
+    "raw_outputs": True
 }
 
 # Preset configurations for common experiments
